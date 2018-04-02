@@ -79,7 +79,7 @@ def rf_topic_train(df, dominio):
                 y=labelencoder_X.fit_transform(y) # Codifico en valores numericos las clases que hay
                 y_original = y
                 
-                if max(y_original) != 1:
+                if max(y_original) != 1 and sum(y_original) != 0:
                     # Encoding a one-hot
                     y = y.reshape(-1, 1)
                     onehotencoder = OneHotEncoder()
@@ -113,7 +113,7 @@ def rf_topic_train(df, dominio):
                 # Predicting the Test set results
                 y_pred = classifier.predict(X_val)
                 
-                if max(y_original) != 1:
+                if max(y_original) != 1 and sum(y_original) != 0:
                     # Formatting results
                     y_val_original = np.asarray(y_val)
                     y_val = pd.DataFrame(y_val)
@@ -148,9 +148,14 @@ def rf_topic_train(df, dominio):
                         
                 print("Modelo "+ str(i)+" entrenado y guardado")
                 i += 1
+                
+    elif dominio == "categoria":   
+        # ToDo
+        print("")
+        return ""
 
 
-def rf_tf_idf_train(df, dominio):
+def tf_idf_train(df, dominio):
     
     """
     Comparo el MAE del tf-idf de mis clases y el de los datos a clasificar y asigno la
@@ -237,10 +242,4 @@ def rf_tf_idf_train(df, dominio):
                 
                 print("Modelo "+str(i)+" resultados")
                 print("accuracy ", accuracy, " precision ", average_precision, " recall ", recall) # Se ve que los resultados son muy malos
-
-                
-                
-                
-                
-    
 

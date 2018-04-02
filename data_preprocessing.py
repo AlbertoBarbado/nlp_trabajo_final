@@ -10,6 +10,7 @@ import glob
 import pandas as pd
 import re
 
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 
 from nltk.corpus import stopwords
 from nltk.stem import SnowballStemmer
@@ -29,9 +30,9 @@ def obtain_train_corpus():
     
     for f in files_tweet_info:
         if type(df_tweet_info)==type(None):
-            df_tweet_info = pd.read_csv(f, sep='\t')
+            df_tweet_info = pd.read_csv(f, sep='\t', encoding="latin-1")
         else:
-            df_tweet_info = pd.concat([df_tweet_info, pd.read_csv(f, sep='\t')])
+            df_tweet_info = pd.concat([df_tweet_info, pd.read_csv(f, sep='\t', encoding="latin-1")])
             
            
     # Se filtra a sólo los datos en EN
@@ -103,7 +104,40 @@ def obtain_train_corpus():
     
     # Elimino filas duplicadas por si hubiese (que de hecho hay)
     df_final = df_final.drop_duplicates(subset="tweet_id")
-
+    
+    # Encoding de dos de las columnas
+    labelencoder_X = LabelEncoder()
+    onehotencoder = OneHotEncoder()
+    df_encoding = df_final["polarity"].copy().drop_duplicates()
+    df_encoding = df_encoding.reset_index()
+    
+    y = labelencoder_X.fit_transform(df_encoding["polarity"])
+    y = y.reshape(-1, 1)
+    y = onehotencoder.fit_transform(y).toarray()
+    
+    # Remove dummy variable trap
+    y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
+    
+    polarity = {}
+    [polarity.update({i:j}) for i,j in zip(df_encoding["polarity"], y)]
+        
+    
+    df_encoding = df_final["topic_priority"].copy().drop_duplicates()
+    df_encoding = df_encoding.reset_index()
+    y = labelencoder_X.fit_transform(df_encoding["topic_priority"])
+    y = y.reshape(-1, 1)
+    y = onehotencoder.fit_transform(y).toarray()
+    
+    # Remove dummy variable trap
+    y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
+    
+    topic_priority = {}
+    [topic_priority.update({i:j}) for i,j in zip(df_encoding["topic_priority"], y)]    
+    encodings = {'polarity':polarity, 'topic_priority':topic_priority}
+    
+    # Guardo en disco los encodings
+    with open(os.path.abspath('') + r'/generated_data/encodings.p', 'wb') as handle:
+            pickle.dump(encodings, handle)
 
     return df_final
 
@@ -185,15 +219,27 @@ def word_processing(documento):
     return words, words_tot, median
 
 
+
+
 def save_corpus(vocabulario, dominio):
     
     if dominio == 'entidad':
         with open(os.path.abspath('') + '/generated_data/vocabulario_'+dominio+'.p', 'wb') as handle:
             pickle.dump(vocabulario, handle)
     
+    elif dominio == 'categoria':
+        with open(os.path.abspath('') + '/generated_data/vocabulario_'+dominio+'.p', 'wb') as handle:
+            pickle.dump(vocabulario, handle)
+    
 
 def load_corpus(dominio):
     if dominio == 'entidad':
+        with open(os.path.abspath('') + '/generated_data/vocabulario_'+dominio+'.p', 'rb') as handle:
+            vocabulario = pickle.load(handle)
+            
+        return vocabulario
+    
+    elif dominio == 'categoria':
         with open(os.path.abspath('') + '/generated_data/vocabulario_'+dominio+'.p', 'rb') as handle:
             vocabulario = pickle.load(handle)
             
@@ -336,6 +382,7 @@ def corpus_generation(df, dominio):
     global_vocab = []
     
     if dominio == 'entidad':
+        df_domain_total_entity = df
         
         # Compruebo si ya esta creado y lo cargo
         try:
@@ -385,30 +432,77 @@ def corpus_generation(df, dominio):
         return vocabulario
         
     elif dominio == 'categoria':
-        # ToDo
-        print("")
-        return ""
+        df_domain_total = df
+        
+        # Compruebo si ya esta creado y lo cargo
+        try:
+            size1 = len(df_domain_total)
+            j = 1
+            for df in df_domain_total:
+                k = 1
+                
+                size2 = len(df_domain_total_entity[domain])
+                entity = list(df.keys())[0]
+                df = list(df.values())[0]
+
+                print("Iteracion "+str(k)+ " de "+str(size2)+" de " +str(j)+ " de " +str(size1))
+                k += 1
+                
+                vocabulario = load_corpus(dominio = 'categoria')
+                j += 1
+            
+            print("Vocabulario para las entidades cargado")
+            
+        except:
+            print("Generando el vocabulario")
+            # df = df_domain_total_entity['automotive'][0]['AB Volvo']
+            #titulo = 'AB Volvo'
+            
+            size1 = len(df_domain_total) 
+            j = 1
+            for df in df_domain_total:
+                k = 1
+                domain = list(df.keys())[0]
+                df = list(df.values())[0]
+                size2 = len(df)
+
+                print("Iteracion "+str(k)+ " de "+str(size2)+" de " +str(j)+ " de " +str(size1))
+                k += 1
+                
+                documento = list(df["text"])
+                words, words_tot, median = word_processing(documento)
+                vocabulario[domain] = [words, words_tot, median]
+                global_vocab.append(words)
+                save_corpus(vocabulario, dominio = 'categoria')
+                j += 1
+                    
+            print("Vocabulario para las entidades generado y persistido")
+            
+        return vocabulario
+        
     else: # dominio completo
         # ToDo
         print("")
         return ""
     
     
-
-if __name__ == "__main__":
-    # Creo un df con los datos agregados
-    df_final = obtain_train_corpus()
+## Creo un df con los datos agregados
+#df_final = obtain_train_corpus()
+#
+## Puedo separarlo en distintos df segun el dominio
+#df_domain_total = [{category:df_domain} for category, df_domain in df_final.groupby('category')]
+#
+## Tambien puedo separar a nivel de dominio y entity
+#df_domain_total_entity = {}
+#for df in df_domain_total:
+#    category = list(df.keys())[0]
+#    df = list(df.values())[0]
+#    df_entities = [{entity:df_entity} for entity, df_entity in df.groupby('entity_name')]
+#    df_domain_total_entity.update({category:df_entities})
+#    
+#dominio = "entidad"
     
-    # Puedo separarlo en distintos df segun el dominio
-    df_domain_total = [{category:df_domain} for category, df_domain in df_final.groupby('category')]
-    
-    # Tambien puedo separar a nivel de dominio y entity
-    df_domain_total_entity = {}
-    for df in df_domain_total:
-        category = list(df.keys())[0]
-        df = list(df.values())[0]
-        df_entities = [{entity:df_entity} for entity, df_entity in df.groupby('entity_name')]
-        df_domain_total_entity.update({category:df_entities})
-        
-        
-    vocabulario = corpus_generation(df_domain_total_entity, "entidad")
+#        
+#    vocabulario = corpus_generation(df_domain_total_entity, "entidad")
+#    
+#    vocabulario_category = corpus_generation(df_domain_total, "categoria")

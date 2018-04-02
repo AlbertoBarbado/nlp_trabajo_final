@@ -19,7 +19,7 @@ from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import confusion_matrix, precision_score, accuracy_score, recall_score
+from sklearn.metrics import confusion_matrix, precision_score, accuracy_score, recall_score, f1_score
 from sklearn import preprocessing
 
 from keras.models import Sequential
@@ -44,6 +44,12 @@ def rf_polarity_train(df, dominio):
     # Puedo separarlo en distintos df segun el dominio
     df_domain_total = [{category:df_domain} for category, df_domain in df_final.groupby('category')]
     
+    # Cargo los encodings
+    with open(os.path.abspath('') + r'/generated_data/encodings.p', 'rb') as handle:
+            encodings = pickle.load(handle)
+    polarity = encodings['polarity']
+    topic_priority = encodings['topic_priority']
+    
     if dominio == "entidad":
         # Tambien puedo separar a nivel de dominio y entity
         df_domain_total_entity = {}
@@ -56,7 +62,8 @@ def rf_polarity_train(df, dominio):
         vocabulario = corpus_generation(df_domain_total_entity, "entidad")
         entidades = list(vocabulario.keys())
         categorias = list(df_domain_total_entity.keys())
-         
+        
+
         i = 1
         total = len(entidades)
         for categoria in categorias:
@@ -71,21 +78,24 @@ def rf_polarity_train(df, dominio):
                 print("Entidad: ", entidad)
                  
                 X = list(df['text'])
-                y = list(df['polarity'])
                 
-                # Encoding a numerico
-                labelencoder_X = LabelEncoder()
-                y=labelencoder_X.fit_transform(y) # Codifico en valores numericos las clases que hay
-                y_original = y
-                
-                if max(y_original) != 1:
-                    # Encoding a one-hot
-                    y = y.reshape(-1, 1)
-                    onehotencoder = OneHotEncoder()
-                    y = onehotencoder.fit_transform(y).toarray()
-                    
-                    # Remove dummy variable trap
-                    y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
+                y = df['polarity']
+                y = np.array([polarity[i] for i in y])
+                                
+#                # Encoding a numerico
+#                labelencoder_X = LabelEncoder()
+#                y=labelencoder_X.fit_transform(y) # Codifico en valores numericos las clases que hay
+#                y_original = y
+#                
+#                # Si tengo un vector donde el mayor valor no sea 1 (y que no sea todo 0's)
+#                if max(y_original) != 1 and sum(y_original) != 0:
+#                    # Encoding a one-hot
+#                    y = y.reshape(-1, 1)
+#                    onehotencoder = OneHotEncoder()
+#                    y = onehotencoder.fit_transform(y).toarray()
+#                    
+#                    # Remove dummy variable trap
+#                    y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
                 
                 # Encoding numerico de las palabras de los vectores de entrada segun el vocabulario
                 
@@ -111,16 +121,15 @@ def rf_polarity_train(df, dominio):
                 
                 # Predicting the Test set results
                 y_pred = classifier.predict(X_val)
+
                 
-                if max(y_original) != 1:
-                    # Formatting results
-                    y_val_original = np.asarray(y_val)
-                    y_val = pd.DataFrame(y_val)
-                    y_pred = pd.DataFrame(y_pred)
-                                
-                    y_val = [np.argmax(np.asarray(x)) for x in y_val.values.tolist()]
-                    y_pred = [np.argmax(np.asarray(x)) for x in y_pred.values.tolist()]              
-                            
+                # Deshago el onehot encoding para sacar las metricas
+                y_val = pd.DataFrame(y_val)
+                y_pred = pd.DataFrame(y_pred)       
+                y_val = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_val.values.tolist()]
+                y_pred = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_pred.values.tolist()]
+
+                        
                 # Making the Confusion Matrix
                 cm = confusion_matrix(y_val, y_pred)
                 
@@ -128,13 +137,16 @@ def rf_polarity_train(df, dominio):
                 accuracy = accuracy_score(y_val, y_pred)
                 
                 # Precision
-                average_precision = precision_score(y_val, y_pred, average = "macro")
+                average_precision = precision_score(y_val, y_pred, average = "weighted")
                 
                 # Recall
-                recall = recall_score(y_val, y_pred, average='macro')
+                recall = recall_score(y_val, y_pred, average='weighted')
+                
+                # F1
+                f1 = f1_score(y_val, y_pred, average='weighted', labels=np.unique(y_pred))
                 
                 print("Modelo "+str(i)+" resultados")
-                print("accuracy ", accuracy, " precision ", average_precision, " recall ", recall)
+                print("accuracy ", accuracy, " precision ", average_precision, " recall ", recall, " f1 ", f1)
  
                 
                 # Eliminio los backslashes de las palabras que los tengan
@@ -155,6 +167,13 @@ def cnn_rnn_polarity_train(df, dominio):
     df_final = obtain_train_corpus()
     # Puedo separarlo en distintos df segun el dominio
     df_domain_total = [{category:df_domain} for category, df_domain in df_final.groupby('category')]
+    
+    # Cargo los encodings
+    with open(os.path.abspath('') + r'/generated_data/encodings.p', 'rb') as handle:
+            encodings = pickle.load(handle)
+    polarity = encodings['polarity']
+    topic_priority = encodings['topic_priority']
+    
     
     if dominio == "entidad":
         # Tambien puedo separar a nivel de dominio y entity
@@ -202,19 +221,24 @@ def cnn_rnn_polarity_train(df, dominio):
                     word2idx, X = word2idx_creation(X, corpus)
                     data = {'word2idx':word2idx}
                     with open(os.path.abspath('') + '/generated_data/word2idx_'+str(entidad)+'.p', 'wb') as handle:
-                         pickle.dump(vocabulario, handle)
+                         pickle.dump(data, handle)
                         
                     print("word2idx creado y guardado para ", entidad)
                     
                     
                 # Feature scaling de los datos de entrada
                 X = [preprocessing.scale(x) for x in X]
-
-                
+                   
                 # Labeling numérico de las clases
                 y = list(df['polarity'])
+#                y = np.array([polarity[i] for i in y])
+                
+                
                 labelencoder_Y = LabelEncoder()
                 Y = labelencoder_Y.fit_transform(y)   
+                                
+#                Y = np.array([np.array([i[0], i[1], 0]) if i[0] != i[1] else np.array([i[0], i[1], 1]) for i in Y])
+                
                 
                 M = 50 # tamaño hidden layer
                 # V # tamaño del vocabulario
@@ -224,10 +248,24 @@ def cnn_rnn_polarity_train(df, dominio):
                 
                 # Defino el dataset de validacion, especifico su tamaño y reservo esa cantidad de datos para ello 
                 X, Y = shuffle(X, Y)
+                X_b = X
+                Y_b = Y
+                
                 N = len(X)
                 Nvalid = round(N/5)
                 Xvalid, Yvalid = X[-Nvalid:], Y[-Nvalid:] # Datos que dejo para validar
                 X, Y = X[:-Nvalid], Y[:-Nvalid] # Datos que dejo para entrenar
+                
+                # Me aseguro que tengo todas las clases en el train/valid 
+                # - sino cojo todos los datos por defecto y no hago validation
+                """En este caso significa que hay pocos datos, no puedo hacer un split a validacion; los datos
+                de validacion seran irrelevantes"""
+                if len(set(Y)) != K or len(set(Yvalid)) != K:
+                    X = X_b
+                    Y = Y_b
+                    Xvalid = X_b
+                    Yvalid = Y
+
     
                 # Hago el padding/truncado de los datos
                 max_review_length = seq_length
@@ -250,7 +288,7 @@ def cnn_rnn_polarity_train(df, dominio):
                 model.add(Conv1D(filters=32, kernel_size=3, padding='same', activation='relu'))
                 model.add(MaxPooling1D(pool_size=2))
                 model.add(LSTM(100))
-                model.add(Dense(3, activation='sigmoid'))
+                model.add(Dense(K, activation='sigmoid'))
                 model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
                 print(model.summary())
                 model.fit(X_train, y_train, epochs=5, batch_size=64)
@@ -260,24 +298,40 @@ def cnn_rnn_polarity_train(df, dominio):
                 print("Accuracy: %.2f%%" % (scores[1]*100))                
                 
                 
-                # CM
+                # Prediciones
                 y_pred = model.predict_classes(X_valid)
+                
+                # Deshago el onehot encoding para sacar las metricas
+                y_val = y_valid
+                
+                y_val = pd.DataFrame(y_val)
+                y_pred = pd.DataFrame(y_pred)       
+                y_val = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_val.values.tolist()]
+                y_pred = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_pred.values.tolist()]
+                
+                
+                # CM
                 confusion = confusion_matrix(np.argmax(y_valid, axis=1), y_pred)
                 
                 # Accuracy
                 accuracy = accuracy_score(Yvalid, y_pred)
                 
                 # Precision
-                precision = precision_score(Yvalid, y_pred, average = "macro")
+                precision = precision_score(Yvalid, y_pred, average = "weighted")
                 
                 # Recall
-                recall = recall_score(Yvalid, y_pred, average='macro') 
+                recall = recall_score(Yvalid, y_pred, average='weighted')
                 
-                print("Accuracy: ", accuracy, " Precision: ", precision, " Recall: ", recall)
+                # F1
+                f1 = f1_score(y_val, y_pred, average='weighted', labels=np.unique(y_pred))
+                
+                print("Modelo "+str(i)+" resultados")
+                print("accuracy ", accuracy, " precision ", precision, " recall ", recall, " f1 ", f1)
                 
                 # Guardo el modelo
                 model.save(os.path.abspath('') + "/generated_data/cnn_keras_model_polarity_"+str(entidad)+".h5")
                 del(model)
+                i += 1
                 
                 
                 
