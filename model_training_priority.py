@@ -19,21 +19,21 @@ from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import confusion_matrix, precision_score, accuracy_score, recall_score
+from sklearn.metrics import confusion_matrix, precision_score, accuracy_score, recall_score, f1_score
 from sklearn import preprocessing
 
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.layers import LSTM
-from keras.layers.convolutional import Conv1D
-from keras.layers.convolutional import MaxPooling1D
-from keras.layers.embeddings import Embedding
-from keras.preprocessing import sequence
-from keras.models import load_model
-from keras.utils.np_utils import to_categorical
-
-from data_preprocessing import word_vector, corpus_generation, obtain_train_corpus, word2idx_creation, word2idx_conversion
-from other_preprocessing import word_tf_idf
+#from keras.models import Sequential
+#from keras.layers import Dense
+#from keras.layers import LSTM
+#from keras.layers.convolutional import Conv1D
+#from keras.layers.convolutional import MaxPooling1D
+#from keras.layers.embeddings import Embedding
+#from keras.preprocessing import sequence
+#from keras.models import load_model
+#from keras.utils.np_utils import to_categorical
+#
+#from data_preprocessing import word_vector, corpus_generation, obtain_train_corpus, word2idx_creation, word2idx_conversion
+#from other_preprocessing import word_tf_idf
 
 global stemmer
 stemmer = SnowballStemmer("english")
@@ -44,6 +44,12 @@ def rf_priority_train(df, dominio):
     df_final = obtain_train_corpus()
     # Puedo separarlo en distintos df segun el dominio
     df_domain_total = [{category:df_domain} for category, df_domain in df_final.groupby('category')]
+    
+    # Cargo los encodings
+    with open(os.path.abspath('') + r'/generated_data/encodings.p', 'rb') as handle:
+            encodings = pickle.load(handle)
+    topic_priority = encodings['topic_priority']
+    
     
     if dominio == "entidad":
         # Tambien puedo separar a nivel de dominio y entity
@@ -73,20 +79,21 @@ def rf_priority_train(df, dominio):
                  
                 X = list(df['text'])
                 y = list(df['topic_priority'])
+                y = np.array([topic_priority[i] for i in y])
                 
-                # Encoding a numerico
-                labelencoder_X = LabelEncoder()
-                y=labelencoder_X.fit_transform(y) # Codifico en valores numericos las clases que hay
-                y_original = y
-                    
-                if max(y_original) != 1 and sum(y_original) != 0:
-                    # Encoding a one-hot
-                    y = y.reshape(-1, 1)
-                    onehotencoder = OneHotEncoder()
-                    y = onehotencoder.fit_transform(y).toarray()
-                    
-                    # Remove dummy variable trap
-                    y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
+#                # Encoding a numerico
+#                labelencoder_X = LabelEncoder()
+#                y=labelencoder_X.fit_transform(y) # Codifico en valores numericos las clases que hay
+#                y_original = y
+#                    
+#                if max(y_original) != 1 and sum(y_original) != 0:
+#                    # Encoding a one-hot
+#                    y = y.reshape(-1, 1)
+#                    onehotencoder = OneHotEncoder()
+#                    y = onehotencoder.fit_transform(y).toarray()
+#                    
+#                    # Remove dummy variable trap
+#                    y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
                     
                 # Encoding numerico de las palabras de los vectores de entrada segun el vocabulario
                 
@@ -113,15 +120,21 @@ def rf_priority_train(df, dominio):
                 # Predicting the Test set results
                 y_pred = classifier.predict(X_val)
                 
-                if max(y_original) != 1 and sum(y_original) != 0:
-                    # Formatting results
-                    y_val_original = np.asarray(y_val)
-                    y_val = pd.DataFrame(y_val)
-                    y_pred = pd.DataFrame(y_pred)
-                                
-                    y_val  = [np.argmax(np.asarray(x)) for x in y_val.values.tolist()]
-                    y_pred = [np.argmax(np.asarray(x)) for x in y_pred.values.tolist()]              
-                            
+                # Deshago el onehot encoding para sacar las metricas
+                y_val = pd.DataFrame(y_val)
+                y_pred = pd.DataFrame(y_pred)       
+                y_val = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_val.values.tolist()]
+                y_pred = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_pred.values.tolist()]
+                
+#                if max(y_original) != 1 and sum(y_original) != 0:
+#                    # Formatting results
+#                    y_val_original = np.asarray(y_val)
+#                    y_val = pd.DataFrame(y_val)
+#                    y_pred = pd.DataFrame(y_pred)
+#                                
+#                    y_val  = [np.argmax(np.asarray(x)) for x in y_val.values.tolist()]
+#                    y_pred = [np.argmax(np.asarray(x)) for x in y_pred.values.tolist()]              
+#                            
                 # Making the Confusion Matrix
                 cm = confusion_matrix(y_val, y_pred)
                 
@@ -134,9 +147,11 @@ def rf_priority_train(df, dominio):
                 # Recall
                 recall = recall_score(y_val, y_pred, average='macro')
                 
+                # F1
+                f1 = f1_score(y_val, y_pred, average='weighted', labels=np.unique(y_pred))
+                
                 print("Modelo "+str(i)+" resultados")
-                print("accuracy ", accuracy, " precision ", average_precision, " recall ", recall) # Se ve que los resultados son muy malos
- 
+                print("accuracy ", accuracy, " precision ", average_precision, " recall ", recall, " f1 ", f1)
                 
                 # Eliminio los backslashes de las palabras que los tengan
                 if '/' in entidad:
@@ -144,7 +159,7 @@ def rf_priority_train(df, dominio):
                          
                 # Persistencia del modelo entrenado
                 with open(os.path.abspath('') + r'/generated_data/model_rf_priority_detection_'+str(entidad)+'.p', 'wb') as handle:
-                        pickle.dump(vocabulario, handle)
+                        pickle.dump(classifier, handle)
 
                 print("Modelo "+ str(i)+" entrenado y guardado")
                 i += 1

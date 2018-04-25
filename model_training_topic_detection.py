@@ -19,20 +19,20 @@ from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import confusion_matrix, precision_score, accuracy_score, recall_score
+from sklearn.metrics import confusion_matrix, precision_score, accuracy_score, recall_score, f1_score
 from sklearn import preprocessing
 
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.layers import LSTM
-from keras.layers.convolutional import Conv1D
-from keras.layers.convolutional import MaxPooling1D
-from keras.layers.embeddings import Embedding
-from keras.preprocessing import sequence
-from keras.models import load_model
-from keras.utils.np_utils import to_categorical
+#from keras.models import Sequential
+#from keras.layers import Dense
+#from keras.layers import LSTM
+#from keras.layers.convolutional import Conv1D
+#from keras.layers.convolutional import MaxPooling1D
+#from keras.layers.embeddings import Embedding
+#from keras.preprocessing import sequence
+#from keras.models import load_model
+#from keras.utils.np_utils import to_categorical
 
-from data_preprocessing import word_vector, corpus_generation, obtain_train_corpus, word2idx_creation, word2idx_conversion
+from data_preprocessing import word_vector, corpus_generation, obtain_train_corpus, word2idx_creation, word2idx_conversion, corpus_generation_chunk
 from other_preprocessing import word_tf_idf
 
 global stemmer
@@ -44,6 +44,13 @@ def rf_topic_train(df, dominio):
     df_final = obtain_train_corpus()
     # Puedo separarlo en distintos df segun el dominio
     df_domain_total = [{category:df_domain} for category, df_domain in df_final.groupby('category')]
+    
+    
+    # Cargo los encodings
+    with open(os.path.abspath('') + r'/generated_data/encodings.p', 'rb') as handle:
+            encodings = pickle.load(handle)
+    topic = encodings['topic']
+    
     
     if dominio == "entidad":
         # Tambien puedo separar a nivel de dominio y entity
@@ -72,21 +79,22 @@ def rf_topic_train(df, dominio):
                 print("Entidad: ", entidad)
                  
                 X = list(df['text'])
-                y = list(df['topic'])
+                y = list(df['topic']) 
+                y = np.array([topic[i] for i in y])
                 
-                # Encoding a numerico
-                labelencoder_X = LabelEncoder()
-                y=labelencoder_X.fit_transform(y) # Codifico en valores numericos las clases que hay
-                y_original = y
-                
-                if max(y_original) != 1 and sum(y_original) != 0:
-                    # Encoding a one-hot
-                    y = y.reshape(-1, 1)
-                    onehotencoder = OneHotEncoder()
-                    y = onehotencoder.fit_transform(y).toarray()
-                    
-                    # Remove dummy variable trap
-                    y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
+#                # Encoding a numerico
+#                labelencoder_X = LabelEncoder()
+#                y=labelencoder_X.fit_transform(y) # Codifico en valores numericos las clases que hay
+#                y_original = y
+#                
+#                if max(y_original) != 1 and sum(y_original) != 0:
+#                    # Encoding a one-hot
+#                    y = y.reshape(-1, 1)
+#                    onehotencoder = OneHotEncoder()
+#                    y = onehotencoder.fit_transform(y).toarray()
+#                    
+#                    # Remove dummy variable trap
+#                    y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
                 
                 # Encoding numerico de las palabras de los vectores de entrada segun el vocabulario
                 
@@ -113,14 +121,21 @@ def rf_topic_train(df, dominio):
                 # Predicting the Test set results
                 y_pred = classifier.predict(X_val)
                 
-                if max(y_original) != 1 and sum(y_original) != 0:
-                    # Formatting results
-                    y_val_original = np.asarray(y_val)
-                    y_val = pd.DataFrame(y_val)
-                    y_pred = pd.DataFrame(y_pred)
-                                
-                    y_val = [np.argmax(np.asarray(x)) for x in y_val.values.tolist()]
-                    y_pred = [np.argmax(np.asarray(x)) for x in y_pred.values.tolist()]              
+                
+                # Deshago el onehot encoding para sacar las metricas
+                y_val = pd.DataFrame(y_val)
+                y_pred = pd.DataFrame(y_pred)       
+                y_val = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_val.values.tolist()]
+                y_pred = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_pred.values.tolist()]
+                           
+#                if max(y_original) != 1 and sum(y_original) != 0:
+#                    # Formatting results
+#                    y_val_original = np.asarray(y_val)
+#                    y_val = pd.DataFrame(y_val)
+#                    y_pred = pd.DataFrame(y_pred)
+#                                
+#                    y_val = [np.argmax(np.asarray(x)) for x in y_val.values.tolist()]
+#                    y_pred = [np.argmax(np.asarray(x)) for x in y_pred.values.tolist()]              
                             
                 # Making the Confusion Matrix
                 cm = confusion_matrix(y_val, y_pred)
@@ -144,7 +159,7 @@ def rf_topic_train(df, dominio):
                          
                 # Persistencia del modelo entrenado
                 with open(os.path.abspath('') + r'/generated_data/model_rf_topic_detection_'+str(entidad)+'.p', 'wb') as handle:
-                        pickle.dump(vocabulario, handle)
+                        pickle.dump(classifier, handle)
                         
                 print("Modelo "+ str(i)+" entrenado y guardado")
                 i += 1
@@ -166,6 +181,12 @@ def tf_idf_train(df, dominio):
     df_final = obtain_train_corpus()
     # Puedo separarlo en distintos df segun el dominio
     df_domain_total = [{category:df_domain} for category, df_domain in df_final.groupby('category')]
+    
+    # Cargo los encodings
+    with open(os.path.abspath('') + r'/generated_data/encodings.p', 'rb') as handle:
+            encodings = pickle.load(handle)
+    topic = encodings['topic']
+    
     
     if dominio == "entidad":
         # Tambien puedo separar a nivel de dominio y entity
@@ -201,9 +222,11 @@ def tf_idf_train(df, dominio):
                 y_tf_idf = list(df_classificacion['topic'])
                 
                 # Encoding a numerico
-                labelencoder_X = LabelEncoder()
-                y_tf_idf=labelencoder_X.fit_transform(y_tf_idf) # Codifico en valores numericos las clases que hay
-
+                y_tf_idf = np.array([topic[i] for i in y_tf_idf])
+                
+#                labelencoder_X = LabelEncoder()
+#                y_tf_idf=labelencoder_X.fit_transform(y_tf_idf) # Codifico en valores numericos las clases que hay
+                
                 
                 # Train/validation split
                 X_train, X_val, y_train, y_val = train_test_split(X_tf_idf, y_tf_idf, 
@@ -227,7 +250,14 @@ def tf_idf_train(df, dominio):
 
                     y_pred.append(y_train[i]) # Identifico con la clase de menor distancia cuadratica TF-IDF
                     
-    
+                    
+                # Deshago cambios
+                y_val = pd.DataFrame(y_val)
+                y_val = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_val.values.tolist()]
+                
+                y_pred = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_pred]
+
+
                 # Making the Confusion Matrix
                 cm = confusion_matrix(y_val, y_pred)
                 
@@ -243,3 +273,181 @@ def tf_idf_train(df, dominio):
                 print("Modelo "+str(i)+" resultados")
                 print("accuracy ", accuracy, " precision ", average_precision, " recall ", recall) # Se ve que los resultados son muy malos
 
+
+                # Eliminio los backslashes de las palabras que los tengan
+                if '/' in entidad:
+                        entidad= entidad.replace('/', '_')
+                         
+                # Persistencia del modelo entrenado
+                with open(os.path.abspath('') + r'/generated_data/model_tf_idf_topic_detection_'+str(entidad)+'.p', 'wb') as handle:
+                        pickle.dump(df_classificacion, handle)
+                        
+                print("Modelo "+ str(i)+" entrenado y guardado")
+                i += 1
+                
+                
+
+def chunks_topic_detection(dominio):
+        
+
+    df_final = obtain_train_corpus()
+    # Puedo separarlo en distintos df segun el dominio
+    df_domain_total = [{category:df_domain} for category, df_domain in df_final.groupby('category')]
+    
+    
+    # Cargo los encodings
+    with open(os.path.abspath('') + r'/generated_data/encodings.p', 'rb') as handle:
+            encodings = pickle.load(handle)
+    topic = encodings['topic']
+    
+    
+    if dominio == "entidad":
+        # Tambien puedo separar a nivel de dominio y entity
+        df_domain_total_entity = {}
+        for df in df_domain_total:
+            category = list(df.keys())[0]
+            df = list(df.values())[0]
+            df_entities = [{entity:df_entity} for entity, df_entity in df.groupby('entity_name')]
+            df_domain_total_entity.update({category:df_entities})
+            
+        vocabulario = corpus_generation_chunk(df_domain_total_entity, dominio = "entidad",
+                                                      tipo = "entidad_chunk_topic")
+        entidades = list(vocabulario.keys())
+        categorias = list(df_domain_total_entity.keys())
+    
+    
+        i = 1
+        total = len(entidades)
+        for categoria in categorias:
+            for df in df_domain_total_entity[categoria]:
+                
+                print("Entrendando modelo " +  str(i) + "/" + str(total))
+        
+                entidad = list(df.keys())[0]
+                df = list(df.values())[0]
+                corpus = vocabulario[entidad][0]
+        
+                print("Entidad: ", entidad)
+                 
+                X = list(df['text'])
+                
+                y = df['topic']
+                y = np.array([topic[i] for i in y])
+                
+                
+                # POS + Chunking
+                """
+                Para hacer el topic detection puedo usar la identificación de NE (named entities) y
+                descartar lo demás. El resto del programa funciona igual.
+                
+                """
+                k = 0
+                for sent in X:
+                    parse_tree = nltk.ne_chunk(nltk.tag.pos_tag(sent.split()), binary=True)  # POS tagging before chunking!
+                    named_entities = []
+        
+                    for t in parse_tree.subtrees():
+                        if t.label() == 'NE':
+                            named_entities.append(t)
+                            # named_entities.append(list(t))  # if you want to save a list of tagged words instead of a tree
+                            
+                    # Uno las entidades extraidas (que pueden componerse de muchas subpartes)
+                    sent_n = ''
+                    for i in named_entities:
+                        for j in i:
+                            sent_n = sent_n + j[0] + ' '
+                            
+                    # Me aseguro de que se haya detectado algo - pongo al menos los nombres propios
+                    if not len(named_entities) > 0: 
+                        for t in parse_tree.leaves():
+                            if t[1] == 'NNP':
+                                named_entities.append(t[0])
+                                
+                        # Si no ha habido NNP, pongo NN
+                        if not len(named_entities) > 0: 
+                            for t in parse_tree.leaves():
+                                if t[1] == 'NN':
+                                    named_entities.append(t[0])
+                                    
+                        # Y si aun no hubiese nada, pongo UNK
+                            if not len(named_entities) > 0: 
+                                named_entities.append('UNK')
+                                sent_n = 'UNK'
+                                X[k] = sent_n
+                                k += 1
+                                continue
+    
+    
+                        # Uno las entidades extraidas (que pueden componerse de muchas subpartes)
+                        sent_n = ''
+                        for i in named_entities:
+                            sent_n = sent_n + i + ' '
+            
+                    X[k] = sent_n
+                    k += 1
+    
+    
+                Xt = word_vector(X, corpus)
+                X = Xt
+                
+                # Train/validation split
+                X_train, X_val, y_train, y_val = train_test_split(X, y, test_size = 0.2, random_state = 0)
+                
+                
+                # Por ser un RF no hace falta hacer feature scaling
+                """from sklearn.preprocessing import StandardScaler
+                sc_X = StandardScaler()
+                X_train = sc_X.fit_transform(X_train)
+                X_test = sc_X.transform(X_test)
+                sc_y = StandardScaler()
+                y_train = sc_y.fit_transform(y_train)"""
+                
+                # Fitting Random Forest Classificator to the Training set
+                classifier = RandomForestClassifier(n_estimators = 200, criterion = 'entropy', random_state = 0)
+                classifier.fit(X_train, y_train)
+                print("Entrenamiento terminado")
+                
+                # Predicting the Test set results
+                y_pred = classifier.predict(X_val)
+                
+                # Deshago el onehot encoding para sacar las metricas
+                y_val = pd.DataFrame(y_val)
+                y_pred = pd.DataFrame(y_pred)       
+                y_val = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_val.values.tolist()]
+                y_pred = [(np.argmax(np.asarray(x)) + 1.0) if max(np.asarray(x)) > 0 else 0.0 for x in y_pred.values.tolist()]
+           
+                            
+                # Making the Confusion Matrix
+                cm = confusion_matrix(y_val, y_pred)
+                
+                # Accuracy
+                accuracy = accuracy_score(y_val, y_pred)
+                
+                # Precision
+                average_precision = precision_score(y_val, y_pred, average = "macro")
+                
+                # Recall
+                recall = recall_score(y_val, y_pred, average='macro')
+                
+                
+                
+                print("Modelo "+str(i)+" resultados")
+                print("accuracy ", accuracy, " precision ", average_precision, " recall ", recall) # Se ve que los resultados son muy malos
+     
+                
+                # Eliminio los backslashes de las palabras que los tengan
+                if '/' in entidad:
+                        entidad= entidad.replace('/', '_')
+                         
+                # Persistencia del modelo entrenado
+                with open(os.path.abspath('') + r'/generated_data/model_rf_topic_detection_'+str(entidad)+'.p', 'wb') as handle:
+                        pickle.dump(classifier, handle)
+                        
+                print("Modelo "+ str(i)+" entrenado y guardado")
+                i += 1
+                
+    elif dominio == "categoria":   
+        # ToDo
+        print("")
+        return ""
+            

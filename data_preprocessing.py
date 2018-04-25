@@ -132,8 +132,22 @@ def obtain_train_corpus():
     y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
     
     topic_priority = {}
-    [topic_priority.update({i:j}) for i,j in zip(df_encoding["topic_priority"], y)]    
-    encodings = {'polarity':polarity, 'topic_priority':topic_priority}
+    [topic_priority.update({i:j}) for i,j in zip(df_encoding["topic_priority"], y)]
+
+
+    df_encoding = df_final["topic"].copy().drop_duplicates()
+    df_encoding = df_encoding.reset_index()
+    y = labelencoder_X.fit_transform(df_encoding["topic"])
+    y = y.reshape(-1, 1)
+    y = onehotencoder.fit_transform(y).toarray()
+    
+    # Remove dummy variable trap
+    y = y[:, 1:] # Elimino una de las columnas por ser linearmente dependiente de las demas
+    
+    topic = {}
+    [topic.update({i:j}) for i,j in zip(df_encoding["topic"], y)]
+        
+    encodings = {'polarity':polarity, 'topic_priority':topic_priority, 'topic':topic}
     
     # Guardo en disco los encodings
     with open(os.path.abspath('') + r'/generated_data/encodings.p', 'wb') as handle:
@@ -226,6 +240,10 @@ def save_corpus(vocabulario, dominio):
     if dominio == 'entidad':
         with open(os.path.abspath('') + '/generated_data/vocabulario_'+dominio+'.p', 'wb') as handle:
             pickle.dump(vocabulario, handle)
+            
+    elif dominio == 'entidad_chunk_topic':
+        with open(os.path.abspath('') + '/generated_data/vocabulario_chunk_topic_'+dominio+'.p', 'wb') as handle:
+            pickle.dump(vocabulario, handle)
     
     elif dominio == 'categoria':
         with open(os.path.abspath('') + '/generated_data/vocabulario_'+dominio+'.p', 'wb') as handle:
@@ -235,6 +253,13 @@ def save_corpus(vocabulario, dominio):
 def load_corpus(dominio):
     if dominio == 'entidad':
         with open(os.path.abspath('') + '/generated_data/vocabulario_'+dominio+'.p', 'rb') as handle:
+            vocabulario = pickle.load(handle)
+            
+        return vocabulario
+    
+    
+    elif dominio == 'entidad_chunk_topic':
+        with open(os.path.abspath('') + '/generated_data/vocabulario_chunk_topic_'+dominio+'.p', 'rb') as handle:
             vocabulario = pickle.load(handle)
             
         return vocabulario
@@ -279,6 +304,11 @@ def word_vector(utterances, corpus):
         words = [stemmer.stem(w) for w in words]
         # Pongo como UNK las que no estan en el vocabulario - flattening
         words = [x if x in corpus else 'UNK' for x in words]
+        
+        # Pongo un UNK si estuviese vacio despues de esto
+        if len(words) == 0:
+            words.append('UNK')
+        
         # Inicializo la bolsa de palabras
         bag_new = []
         bag_final = []
@@ -312,8 +342,8 @@ def word2idx_creation(utterances, corpus):
     words = []
     X = []
     
-    word2idx = {'START': 0, 'END': 1} # Start/End Tokens. Inicialmente así mi frase es: START END
-    current_idx = 2 # El indice comenzará desde la posición 2
+    word2idx = {'START': 0, 'END': 1, 'UNK': 3} # Start/End Tokens. Inicialmente así mi frase es: START END
+    current_idx =  3 # El indice comenzará desde la posición 2
     
     for text in utterances:
         # Tokenizo cada frase
@@ -337,6 +367,7 @@ def word2idx_creation(utterances, corpus):
             idx = word2idx[t]
             sentence.append(idx)
     
+        
         # Guardo la frase final
         X.append(np.array(sentence)) # lo guardo como un numpy array
         
@@ -485,6 +516,196 @@ def corpus_generation(df, dominio):
         print("")
         return ""
     
+    
+
+def corpus_generation_chunk(df, dominio, tipo):
+    
+    # tipo = "entidad_chunk_topic"
+    vocabulario = {}
+    global_vocab = []
+    
+    if dominio == 'entidad':
+        df_domain_total_entity = df
+        
+        # Compruebo si ya esta creado y lo cargo
+        try:
+            size1 = len(df_domain_total_entity)
+            j = 1
+            for domain in list(df_domain_total_entity.keys()):
+                k = 1
+                for df in df_domain_total_entity[domain]:
+                    size2 = len(df_domain_total_entity[domain])
+                    entity = list(df.keys())[0]
+                    df = list(df.values())[0]
+
+                    print("Iteracion "+str(k)+ " de "+str(size2)+" de " +str(j)+ " de " +str(size1))
+                    k += 1
+                    
+                    vocabulario = load_corpus(dominio = tipo)
+                j += 1
+            
+            print("Vocabulario para las entidades cargado")
+            
+        except:
+            print("Generando el vocabulario")
+            # df = df_domain_total_entity['automotive'][0]['AB Volvo']
+            #titulo = 'AB Volvo'
+            
+            size1 = len(df_domain_total_entity) 
+            j = 1
+            for domain in list(df_domain_total_entity.keys()):
+                k = 1
+                for df in df_domain_total_entity[domain]:
+                    size2 = len(df_domain_total_entity[domain])
+                    entity = list(df.keys())[0]
+                    df = list(df.values())[0]
+
+                    print("Iteracion "+str(k)+ " de "+str(size2)+" de " +str(j)+ " de " +str(size1))
+                    k += 1
+                    
+                    documento = list(df["text"])
+                    words, words_tot, median = word_processing_chunk(documento, tipo)
+                    vocabulario[entity] = [words, words_tot, median]
+                    global_vocab.append(words)
+                    save_corpus(vocabulario, dominio = tipo)
+                j += 1
+                    
+            print("Vocabulario para las entidades generado y persistido")
+            
+        return vocabulario
+        
+    elif dominio == 'categoria':
+        # ToDo
+        return ""
+        
+    else: # dominio completo
+        # ToDo
+        print("")
+        return ""
+
+
+def word_processing_chunk(documento, tipo):
+    
+    words = []
+    word_list = []
+    df_pattern = pd.DataFrame()
+    
+
+    if tipo == "entidad_chunk_topic":
+        k = 0
+        for sent in documento:
+            parse_tree = nltk.ne_chunk(nltk.tag.pos_tag(sent.split()), binary=True)  # POS tagging before chunking!
+            named_entities = []
+
+            for t in parse_tree.subtrees():
+                if t.label() == 'NE':
+                    named_entities.append(t)
+                    
+            # Uno las entidades extraidas (que pueden componerse de muchas subpartes)
+            sent_n = ''
+            for i in named_entities:
+                for j in i:
+                    sent_n = sent_n + j[0] + ' '
+                    
+            # Me aseguro de que se haya detectado algo - pongo al menos los nombres propios
+            if not len(named_entities) > 0: 
+                for t in parse_tree.leaves():
+                    if t[1] == 'NNP':
+                        named_entities.append(t[0])
+                        
+                # Si no ha habido NNP, pongo NN
+                if not len(named_entities) > 0: 
+                    for t in parse_tree.leaves():
+                        if t[1] == 'NN':
+                            named_entities.append(t[0])
+                            
+                # Y si aun no hubiese nada, pongo UNK
+                    if not len(named_entities) > 0: 
+                        named_entities.append('UNK')
+                        sent_n = 'UNK'
+                        documento[k] = sent_n
+                        k += 1
+                        continue
+
+                # Uno las entidades extraidas (que pueden componerse de muchas subpartes)
+                sent_n = ''
+                for i in named_entities:
+                    sent_n = sent_n + i + ' '
+    
+            documento[k] = sent_n
+            k += 1
+    
+    i = 0
+    # Hago la tokenizacion
+    for utterance in documento:
+        # Tokenizo cada frase
+        w = re.findall(r'\w+', utterance.lower(),flags = re.UNICODE) # Paso a minusculas todo
+        words = w
+        # Eliminación de las stop_words 
+        words = [word for word in words if word not in stopwords.words('english')]
+        # Elimino guiones y otros simbolos raros
+        words = [word for word in words if not word.isdigit()] # Elimino numeros     
+        # Stemming y eliminación de duplicados
+        words = [stemmer.stem(w) for w in words]
+        # Inicializo la bolsa de palabras
+        pattern_words = words
+
+        # Si esta vacia la utterance, me salto la iteracion
+        if len(words) == 0:
+            continue
+
+        df = pd.DataFrame(pattern_words)
+        df['ocurrencias'] = 1 
+        df.columns = ['palabras', 'ocurrencias']
+        df = df.groupby(['palabras'])['ocurrencias'].sum() # En este pundo, al pasarlo a indices, se ordenan
+        df = pd.DataFrame(df)
+        df['n_documento'] = i
+        i += 1
+        
+        df_pattern = df_pattern.append(df)
+        
+        # Añado las palabras a la lista
+        word_list.extend(words)
+        
+    # N - num de documentos totales
+    n = i
+    
+    df_pattern = df_pattern.reset_index()
+    
+    # Doc frequency - documentos que contienen cada palabra
+    df_pattern["doc"] = 1
+    df = df_pattern.groupby(['palabras', 'n_documento'])['doc'].mean()
+    df = df.reset_index()
+    df = df_pattern.groupby(['palabras'])['doc'].sum()
+    df = df.reset_index()
+    df_pattern = df_pattern.drop(['doc'], axis=1)
+    
+    # TF - frecuencia de palabras por entrada
+    df_pattern = df_pattern.merge(df, on="palabras", how="left")
+    df_pattern['tf-idf'] = df_pattern.apply(lambda x: np.log(n/x['doc'])*x['ocurrencias'], axis=1)
+
+    # Frecuencia total de terminos en el vocabulario
+    df_aux = df_pattern.groupby(['palabras'])['ocurrencias'].sum()
+    df_aux = df_aux.reset_index()
+    
+    
+    words_tot = df_pattern.to_dict()
+    
+    words_tot['palabras'].update({'UNK':0}) 
+
+    # Creo Vocabulario
+    words =  sorted(list(set(word_list))) # Ordeno alfabéticamente y elimino duplicados
+    words.append('UNK') # Palabra por defecto para las palabras desconocidas
+    
+    # Suma de TF-IDF por entrada
+    df_suma = df_pattern.groupby(['n_documento'])['tf-idf'].sum()
+    df_suma = df_suma.reset_index()
+    
+    # Valor minimo, medio, maximo y std de una entrada
+    median = df_suma['tf-idf'].median()
+    
+    
+    return words, words_tot, median  
     
 ## Creo un df con los datos agregados
 #df_final = obtain_train_corpus()

@@ -116,3 +116,81 @@ df_suma['tf-idf'].hist()
 normaltest(df_suma['tf-idf'])
 
 plt.hist(df_suma['tf-idf'], 50, normed=1, facecolor='green', alpha=0.75)
+
+
+
+# Longitud de las secuencias (caracteres) a nivel general
+df_final = df_final.reset_index()
+l = [len(df_final['text'].loc[i]) for i in range(len(df_final))]
+
+import statistics
+mediana = statistics.median(l)
+
+# Longitud de las secuencias (palabras) a nivel general
+def word_processing_desc(utterance):
+    
+    words = []
+    
+    # Hago la tokenizacion
+    # Tokenizo cada frase
+    w = re.findall(r'\w+', utterance.lower(),flags = re.UNICODE) # Paso a minusculas todo
+    words = w
+    # Eliminación de las stop_words 
+    words = [word for word in words if word not in stopwords.words('english')]
+    # Elimino guiones y otros simbolos raros
+    words = [word for word in words if not word.isdigit()] # Elimino numeros     
+    # Stemming y eliminación de duplicados
+    words = [stemmer.stem(w) for w in words]
+
+    return words
+
+
+l = [word_processing_desc(df_final['text'].loc[i]) for i in range(len(df_final))]
+l1 = [len(i) for i in l]
+mediana = statistics.median(l1)
+
+
+# Lo obtenemos para cada categoria y dominio
+df_final = obtain_train_corpus()
+# Puedo separarlo en distintos df segun el dominio
+df_domain_total = [{category:df_domain} for category, df_domain in df_final.groupby('category')]
+
+# Cargo los encodings
+with open(os.path.abspath('') + r'/generated_data/encodings.p', 'rb') as handle:
+    encodings = pickle.load(handle)
+polarity = encodings['polarity']
+topic_priority = encodings['topic_priority']
+    # Tambien puedo separar a nivel de dominio y entity
+df_domain_total_entity = {}
+for df in df_domain_total:
+    category = list(df.keys())[0]
+    df = list(df.values())[0]
+    df_entities = [{entity:df_entity} for entity, df_entity in df.groupby('entity_name')]
+    df_domain_total_entity.update({category:df_entities})
+
+# Cargo el vocabulario generado
+vocabulario = load_corpus(dominio)
+entidades = list(vocabulario.keys())
+categorias = list(df_domain_total_entity.keys())
+
+d = {}
+for categoria in categorias:
+    for df in df_domain_total_entity[categoria]:
+        entidad = list(df.keys())[0]
+        df = list(df.values())[0]
+        
+        df = df.reset_index()
+        l = [word_processing_desc(df['text'].loc[i]) for i in range(len(df))]
+        l1 = [len(i) for i in l]
+        maximum = max(l1)
+        
+        # Eliminio los backslashes de las palabras que los tengan
+        if '/' in entidad:
+                entidad= entidad.replace('/', '_')
+                        
+        d[entidad] = maximum
+                
+# Guardo ese diccionario
+with open(os.path.abspath('') + r'/generated_data/max_length.p', 'wb') as handle:
+    pickle.dump(d, handle)        
+        
